@@ -1,0 +1,277 @@
+nclude "simpletools.h"
+#include "servo.h"
+#include "fdserial.h"
+#include "servodiffdrive.h"
+#include "ping.h" // Include ping header
+
+#define PIN_SOUND 26 // pin for the speaker, default=26
+#define PIN_XBEE_RX 0
+#define PIN_XBEE_TX 1
+#define PIN_SERVO_LEFT 14
+#define PIN_SERVO_RIGHT 15
+#define PIN_SERVO_MID 16
+
+volatile int ch;
+volatile int XeeChange=0;
+volatile int cmDist=0;
+volatile int turn=0;
+volatile unsigned int lockR; // Lock ID
+int DO = 22, CLK = 23, DI = 24, CS = 25; // SD I/O pins
+int * cog_ptr[8];
+int pinLeft, pinRight, rampLeft, rampRight; // Variables shared by functions
+char style='1'; // variable for dancing(), what dancing style, 1 for default
+volatile fdserial *xbee;
+
+void XBee();
+void light();
+void trackLight();
+void dancing();
+void changeStyle();
+int checkSpace();
+char char2lowercase (char c);
+
+int lightLeft, lightRight, dance;
+
+int main(){
+    cog_run(changeStyle, 64);
+    cog_run(light, 64);
+    cog_run(trackLight, 64);
+}
+
+void light(){
+    //sence the light
+
+    while(1){
+        high(9);
+        pause(1);
+
+        lightLeft = rc_time(9, 1);
+        high(5);
+        pause(1);
+
+        lightRight = rc_time(5, 1);
+        pause(250);
+    }
+}
+
+void trackLight(){
+    //track the light
+
+    int dance;
+    int distance;
+
+    while(1){
+        if (lightLeft < 35 && lightRight < 35){ //ready
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            dance = checkSpace();
+            dancing(dance, style);
+        }
+        else if (lightLeft < lightRight){ //track light
+            servo_angle(16, 800);
+            distance = ping_cm(17);
+
+            if (distance < 8){
+                servo_speed(18, 0);
+                servo_speed(19, 0);
+            }
+            else{
+                servo_speed(18, -10);
+                servo_speed(19, -50);
+            }
+        }
+        else if (lightRight < lightLeft){ //track light
+            servo_angle(16, 800);
+            distance = ping_cm(17);
+
+            if (distance < 8){
+                servo_speed(18, 0);
+                servo_speed(19, 0);
+            }
+            else{
+                servo_speed(18, 50);
+                servo_speed(19, 10);
+            }
+        }
+    }
+}
+
+int checkSpace(){
+    //This function is to check if there is enough space to dance
+
+    int distance;
+    int check_angle[3] = {1300, 800, 300};
+
+    if (1){
+        for(int i=0; i<3; i++){
+            servo_angle(16, check_angle[i]);
+            pause(300);
+            distance = ping_cm(17);
+            print("distance: %d\n", distance);
+            if (distance < 8){
+                return 0;
+            }
+        }
+    }
+
+    servo_angle(16, 800);
+    return 1;
+}
+
+void dancing(int dance, int style){
+    //This is the function how to dance
+
+    if (dance == 1){
+        if (style == '1'){
+            servo_speed(18, 50);
+            servo_speed(19, -50);
+            pause(300);
+            servo_speed(18, -50);
+            servo_speed(19, 50);
+            pause(300);
+            servo_speed(18, 50);
+            servo_speed(19, -50);
+            pause(300);
+            servo_speed(18, -50);
+            servo_speed(19, 50);
+            pause(300);
+            servo_angle(16, 300);
+            servo_speed(18, 50);
+            servo_speed(19, 50);
+            pause(800);
+            servo_angle(16, 1400);
+            servo_speed(18, -50);
+            servo_speed(19, -50);
+            pause(800);
+        }
+        else if (style == '2'){
+            servo_speed(18, 50);
+            servo_speed(19, 50);
+            pause(300);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            servo_speed(18, 50);
+            servo_speed(19, 50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(100);
+            servo_speed(18, 50);
+            servo_speed(19, 50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            servo_speed(18, 50);
+            servo_speed(19, 50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            servo_speed(18, -50);
+            servo_speed(19, -50);
+            pause(300);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            servo_speed(18, -50);
+            servo_speed(19, -50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(100);
+            servo_speed(18, -50);
+            servo_speed(19, -50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+            servo_speed(18, -50);
+            servo_speed(19, -50);
+            pause(100);
+            servo_speed(18, 0);
+            servo_speed(19, 0);
+            pause(300);
+        }
+    }
+}
+
+void changeStyle(){
+    //change dancing style according to the gesture
+
+    xbee = fdserial_open(PIN_XBEE_RX, PIN_XBEE_TX, 0, 9600);
+    cog_ptr[1] = cog_run(&XBee,32);
+    int changeStyle;
+    char last = '1';
+    int sum = 0;
+    print("Dancing Style\n");
+    while(1)
+    {
+        if(XeeChange)
+        {
+            ch = char2lowercase(ch);
+            switch ((char) ch)
+            {
+                case '1':
+                if (last == ch){
+                    sum += 1;
+                    pause(300);
+                    if (sum == 3){
+                        style = ch;
+                        sum = 0;
+                        print("style = %c\n", style);
+                    }
+                }
+                else{
+                    sum = 0;
+                }
+                last = ch;
+                break;
+                case '2':
+                if (last == ch){
+                    sum += 1;
+                    pause(300);
+                    if (sum == 3){
+                        style = ch;
+                        sum = 0;
+                        print("style = %c\n", style);
+                    }
+                }
+                else{
+                    sum = 0;
+                }
+                last = ch;
+                break;
+                case '0':
+                case '3':
+                case '4':
+                case '5':
+                print("Nothing: %c\n", ch);
+                break;
+                default:
+                print("%c", (char) ch);
+            }
+            XeeChange = 0;
+        }
+        pause(1);
+    }
+}
+
+void XBee(){
+    putchar(CLS);
+    fdserial_rxFlush(xbee);
+    while(1){
+        ch = fdserial_rxChar(xbee);
+        XeeChange = 1;
+        fdserial_txChar(xbee, ch);
+        fdserial_txFlush(xbee);
+    }
+}
+
+char char2lowercase (char c) {
+    return ('A'<=c && c<='Z') ? c+32 : c;
+}
+
+
